@@ -2,7 +2,8 @@ name: Daily India Financial News
 
 on:
   schedule:
-    - cron: "0 2 * * *"   # Runs every day at 2 AM UTC (7:30 AM IST)
+      - cron: "0 * * * *"
+  
   workflow_dispatch:       # Allow manual run
 
 jobs:
