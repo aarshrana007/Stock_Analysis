@@ -1,10 +1,10 @@
 import feedparser
 from datetime import datetime, timezone, timedelta
 import os
-import json
+import csv
 import argparse
 
-# Default RSS feeds (comprehensive Indian + global financial news)
+# Default comprehensive RSS feeds for Indian financial news
 DEFAULT_RSS_FEEDS = [
     "https://economictimes.indiatimes.com/rss/markets.cms",
     "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146843.cms",
@@ -17,87 +17,85 @@ DEFAULT_RSS_FEEDS = [
     "https://www.cnbc.com/id/10000664/device/rss/rss.html",
 ]
 
-# Parse optional command-line feeds (space-separated)
+# Allow override via command line (for GitHub Actions manual run)
 parser = argparse.ArgumentParser()
 parser.add_argument("--feeds", nargs="*", default=DEFAULT_RSS_FEEDS,
                     help="Optional list of RSS feeds to override defaults")
 args = parser.parse_args()
-
 RSS_FEEDS = args.feeds
 
-# Folders and files
+# Paths
 folder_path = "news_data"
 os.makedirs(folder_path, exist_ok=True)
 
-seen_file = os.path.join(folder_path, "seen_links.json")
-master_file = os.path.join(folder_path, "all_financial_news.jsonl")  # .jsonl for line-separated
-
+seen_file = os.path.join(folder_path, "seen_links.txt")  # For permanent deduplication
 today_str = datetime.now().strftime("%Y-%m-%d")
-daily_file = os.path.join(folder_path, f"financial_news_{today_str}.json")
+daily_csv = os.path.join(folder_path, f"india_financial_news_{today_str}.csv")  # Only this file
 
 IST_OFFSET = timedelta(hours=5, minutes=30)
 
-# Load seen links
+# Load all previously seen links (prevents duplicates forever)
 if os.path.exists(seen_file):
     with open(seen_file, "r", encoding="utf-8") as f:
-        seen_links = set(json.load(f))
+        seen_links = set(line.strip() for line in f if line.strip())
 else:
     seen_links = set()
 
 new_articles = []
 new_links = []
 
+# CSV columns
+fieldnames = ["title", "link", "published_ist", "summary", "source"]
+
 for feed_url in RSS_FEEDS:
+    print(f"Fetching: {feed_url}")
     feed = feedparser.parse(feed_url)
-    print(f"Parsing feed: {feed_url} ({len(feed.entries)} entries)")
 
     for entry in feed.entries:
         link = entry.get("link", "").strip()
         if not link or link in seen_links:
-            continue
+            continue  # Skip if already saved any day
 
         try:
-            if hasattr(entry, "published_parsed"):
+            # Parse published time
+            if hasattr(entry, "published_parsed") and entry.published_parsed:
                 pub_utc = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-                pub_ist = pub_utc + IST_OFFSET
             else:
-                pub_ist = datetime.now(timezone.utc) + IST_OFFSET
+                pub_utc = datetime.now(timezone.utc)
+            pub_ist = pub_utc + IST_OFFSET
 
-            summary = getattr(entry, "summary", getattr(entry, "description", ""))
+            summary = getattr(entry, "summary", getattr(entry, "description", "")).strip()
 
             article = {
-                "title": entry.get("title", ""),
+                "title": entry.get("title", "").strip(),
                 "link": link,
-                "published": pub_ist.isoformat(),
-                "summary": summary.strip(),
+                "published_ist": pub_ist.strftime("%Y-%m-%d %H:%M:%S IST"),
+                "summary": summary,
                 "source": feed_url
             }
+
             new_articles.append(article)
             new_links.append(link)
             seen_links.add(link)
+
         except Exception as e:
-            print(f"Error processing entry: {e}")
+            print(f"Error processing entry from {feed_url}: {e}")
             continue
 
-# Save new articles
+# Save only to today's CSV file (append if file exists)
 if new_articles:
-    # Append to master (line-separated JSON for easy large-file handling)
-    with open(master_file, "a", encoding="utf-8") as f:
-        for art in new_articles:
-            json.dump(art, f, ensure_ascii=False)
-            f.write("\n")
+    file_exists = os.path.isfile(daily_csv)
+    with open(daily_csv, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()  # Add header only on first run of the day
+        writer.writerows(new_articles)
 
-    # Save today's batch separately
-    with open(daily_file, "w", encoding="utf-8") as f:
-        json.dump(new_articles, f, indent=2, ensure_ascii=False)
+    # Update seen_links.txt with new links
+    with open(seen_file, "a", encoding="utf-8") as f:
+        for link in new_links:
+            f.write(link + "\n")
 
-    # Update seen links
-    with open(seen_file, "w", encoding="utf-8") as f:
-        json.dump(list(seen_links), f)
-
-    print(f"Fetched and saved {len(new_articles)} new articles.")
+    print(f"Saved {len(new_articles)} new articles to {daily_csv}")
 else:
-    print("No new articles this run.")
-
-# Optional: Commit changes if you want history in repo
-# (Handled in workflow below)
+    print("No new articles found in this run.")
