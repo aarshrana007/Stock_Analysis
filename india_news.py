@@ -45,7 +45,7 @@ new_articles = []
 new_links = []
 
 # CSV columns
-fieldnames = ["title", "link", "published_ist", "summary", "source"]
+fieldnames = ["title", "link", "published", "summary", "source"]
 
 for feed_url in RSS_FEEDS:
     print(f"Fetching: {feed_url}")
@@ -69,7 +69,7 @@ for feed_url in RSS_FEEDS:
             article = {
                 "title": entry.get("title", "").strip(),
                 "link": link,
-                "published_ist": pub_ist.strftime("%Y-%m-%d %H:%M:%S IST"),
+                "published": pub_ist.strftime("%Y-%m-%d %H:%M:%S IST"),
                 "summary": summary,
                 "source": feed_url
             }
